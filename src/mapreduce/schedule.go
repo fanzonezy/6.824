@@ -1,6 +1,9 @@
 package mapreduce
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 //
 // schedule() starts and waits for all tasks in the given phase (mapPhase
@@ -30,5 +33,63 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	// Your code here (Part III, Part IV).
 	//
+
+	var wg sync.WaitGroup;
+	wg.Add(ntasks);
+	go func () {
+		tasks := make(chan int, ntasks);
+		defer close(tasks);
+		initTasks(tasks, ntasks)
+		for currTaskNumber := range tasks { // once there is a unfinished task.
+			addr := <- registerChan
+			var args DoTaskArgs;
+			switch phase {
+			case mapPhase:
+				args = DoTaskArgs{
+					JobName:       jobName,
+					File:          mapFiles[currTaskNumber],
+					Phase:         mapPhase,
+					TaskNumber:    currTaskNumber,
+					NumOtherPhase: n_other,
+				}
+			case reducePhase:
+				args = DoTaskArgs{
+					JobName:       jobName,
+					Phase:         reducePhase,
+					TaskNumber:    currTaskNumber,
+					NumOtherPhase: n_other,
+				}
+			}
+			go executeOne(addr, args, &wg, registerChan, tasks);
+		}
+	} ();
+	wg.Wait();
+
 	fmt.Printf("Schedule: %v done\n", phase)
+}
+
+func executeOne(addr string,
+				args DoTaskArgs,
+				wg *sync.WaitGroup,
+				registerChan chan string,
+				tasks chan int) bool {
+	defer func () {
+		fmt.Printf("Schedule(%s): adding %s back to available workers\n", args.Phase, addr);
+		registerChan <- addr;
+	} (); // recording one task is done.
+	success := call(addr, "Worker.DoTask", args, nil);
+	if !success {
+		// reschedule
+		fmt.Printf("Schedule(%s): task %d failed. Add it back.\n", args.Phase, args.TaskNumber);
+		tasks <- args.TaskNumber;  // add failed task back
+	} else {
+		wg.Done();
+	}
+	return success;
+}
+
+func initTasks(tasks chan int, ntasks int) {
+	for i := 0; i < ntasks; i++ {
+		tasks <- i;
+	}
 }

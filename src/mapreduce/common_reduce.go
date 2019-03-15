@@ -1,5 +1,12 @@
 package mapreduce
 
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+)
+
 func doReduce(
 	jobName string, // the name of the whole MapReduce job
 	reduceTask int, // which reduce task this is
@@ -44,4 +51,43 @@ func doReduce(
 	//
 	// Your code here (Part I).
 	//
+	kVals := make(map[string][]string);
+	for m := 0; m < nMap; m++ {
+		intermFileName := reduceName(jobName, m, reduceTask);
+		fmt.Printf("Reduce: reading file=%s\n", intermFileName);
+		f, err := os.Open(intermFileName);
+		defer f.Close();
+		if err != nil {
+			log.Fatal("Reduce: error while creating reduce file: ", intermFileName, ", ", err);
+		}
+		dec := json.NewDecoder(f);
+		kv := KeyValue{};
+		err = nil
+		for err == nil {
+			err = dec.Decode(&kv);
+			vals:= kVals[kv.Key]
+			if vals != nil {
+				kVals[kv.Key] = append(vals, kv.Value);
+			} else {
+				kVals[kv.Key] = []string{kv.Value};
+			}
+		}
+	}
+
+	fmt.Printf("Reduce: using outFile=%s\n", outFile);
+	outf, err := os.Create(outFile);
+	if err != nil {
+
+	}
+	enc := json.NewEncoder(outf)
+	for k, vals := range kVals {
+		//fmt.Printf("Reduce: perform reductF on key=%s, val=%s\n", k, vals);
+		res := reduceF(k, vals)
+		kv := KeyValue{k, res};
+		//fmt.Printf("Reduce: persisting kv=%s\n", kv);
+		if err := enc.Encode(&kv); err != nil {
+			log.Fatal("Reduce: error while encoding kv :", kv, ", r :", reduceTask);
+		}
+	}
+
 }
